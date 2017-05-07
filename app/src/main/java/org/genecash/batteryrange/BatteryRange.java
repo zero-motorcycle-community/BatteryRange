@@ -222,6 +222,14 @@ public class BatteryRange extends AppCompatActivity
         map.setOnMapClickListener(this);
         map.setOnMapLongClickListener(this);
 
+        // the circle click overrides the map click
+        map.setOnCircleClickListener(new GoogleMap.OnCircleClickListener() {
+            @Override
+            public void onCircleClick(Circle circle) {
+                showCircles();
+            }
+        });
+
         updateLocationUI();
         btConnect();
     }
@@ -277,10 +285,7 @@ public class BatteryRange extends AppCompatActivity
             Toast.makeText(this, "Location not acquired", Toast.LENGTH_LONG).show();
             return;
         }
-        boolean old = flagZoom;
-        flagZoom = true;
-        resize();
-        flagZoom = old;
+        showCircles();
     }
 
     // handle map long-press to place marker
@@ -463,6 +468,14 @@ public class BatteryRange extends AppCompatActivity
         }
     }
 
+    // show the circles once
+    void showCircles() {
+        boolean old = flagZoom;
+        flagZoom = true;
+        resize();
+        flagZoom = old;
+    }
+
     // create range circles
     void createCircles() {
         if (rangeCircle == null && range > 0 && currLocation != null) {
@@ -482,7 +495,8 @@ public class BatteryRange extends AppCompatActivity
             CircleOptions circleOptions2 = new CircleOptions()
                     .center(position)
                     .radius(range / 2)
-                    .fillColor(Color.argb(0, 0, 0, 0));
+                    .fillColor(Color.argb(0, 0, 0, 0))
+                    .clickable(true);
             rangeCircle2 = map.addCircle(circleOptions2);
         }
     }
