@@ -721,6 +721,7 @@ public class BatteryRange extends AppCompatActivity
             return;
         }
 
+        // handle data from device
         rangeTask = new BtRange();
         rangeTask.execute();
     }
@@ -788,8 +789,9 @@ public class BatteryRange extends AppCompatActivity
                     } catch (IOException e) {
                         // the device disconnected
                         // note that it takes a little while (about 20 seconds) to notice
+                        range = 0;
                         log("disconnected (read)");
-                        publishProgress("Device disconnected");
+                        publishProgress("Device disconnected (read error)");
                         btOutputStream.close();
                         btInputStream.close();
                         btSocket.close();
@@ -798,13 +800,17 @@ public class BatteryRange extends AppCompatActivity
                         btRetry();
                         return null;
                     }
+
+                    // not our message
+                    if (data.length() != 16) {
+                        continue;
+                    }
+
+                    // no change, no need to process
                     if (data.equals(oldData)) {
                         continue;
                     }
                     oldData = data;
-                    if (data.length() < 16) {
-                        continue;
-                    }
 
                     // data line looks like 7E110200144D0410
                     // range (miles) = 0x4D14/160.9
@@ -823,7 +829,7 @@ public class BatteryRange extends AppCompatActivity
                             // note that we find out instantly here
                             // (this is kind of weird that this happens)
                             log("disconnected (range): " + data);
-                            publishProgress("Device disconnected");
+                            publishProgress("Device disconnected (zero range)");
                             btOutputStream.close();
                             btInputStream.close();
                             btSocket.close();
@@ -835,6 +841,7 @@ public class BatteryRange extends AppCompatActivity
                     }
                 }
 
+                range = 0;
                 log("disconnecting");
                 publishProgress("Disconnecting from device");
 
@@ -862,13 +869,23 @@ public class BatteryRange extends AppCompatActivity
                 return;
             }
 
-            // update range circles
-            createCircles();
-            if (rangeCircle != null) {
-                log("update circles");
-                rangeCircle.setRadius(range);
-                rangeCircle2.setRadius(range / 2);
-                resize();
+            if (range == 0) {
+                if (rangeCircle != null) {
+                    // disconnected, remove circles
+                    rangeCircle2.remove();
+                    rangeCircle.remove();
+                    rangeCircle = null;
+                    rangeCircle2 = null;
+                }
+            } else {
+                // update range circles
+                createCircles();
+                if (rangeCircle != null) {
+                    log("update circles");
+                    rangeCircle.setRadius(range);
+                    rangeCircle2.setRadius(range / 2);
+                    resize();
+                }
             }
         }
     }
