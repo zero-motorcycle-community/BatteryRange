@@ -92,6 +92,7 @@ public class BatteryRange extends AppCompatActivity
     static final String PREFS_DEST_LAT = "dest-lat";
     static final String PREFS_DEST_LNG = "dest-lng";
     static final String PREFS_DEST_SNIP = "dest-snip";
+    static final String PREFS_BULLSHIT_FACTOR = "bullshit-factor";
     // zoom to fit range circle
     boolean flagZoom;
     // center on location
@@ -107,6 +108,8 @@ public class BatteryRange extends AppCompatActivity
     Location currLocation = null;
     // range is in meters
     double range = -1;
+    // this is the range (in meters) at which power drops to zero
+    double bullshit_factor;
     Marker markHome = null;
     Marker markDest = null;
     static final int MARK_UNKNOWN = 0;
@@ -178,6 +181,7 @@ public class BatteryRange extends AppCompatActivity
 
         // read preferences
         prefs = PreferenceManager.getDefaultSharedPreferences(this);
+        bullshit_factor = prefs.getInt(PREFS_BULLSHIT_FACTOR, 30) * 1000;
         flagCenter = prefs.getBoolean(PREFS_CENTER, true);
         flagZoom = prefs.getBoolean(PREFS_ZOOM, true);
         btName = prefs.getString(PREFS_DEVICE, null);
@@ -817,7 +821,7 @@ public class BatteryRange extends AppCompatActivity
                     // range (km) = 0x4D14/100
                     // range (meters) = 0x4D14*10
                     hex = data.substring(10, 12) + data.substring(8, 10);
-                    range = Integer.parseInt(hex, 16) * 10;
+                    range = (Integer.parseInt(hex, 16) * 10) - bullshit_factor;
                     if (range != oldRange) {
                         oldRange = range;
                         log("Range (meters):" + range);
