@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android = "http://schemas.android.com/apk/res/android"
           package = "org.genecash.batteryrange"
-          android:versionCode = "1506301883"
-          android:versionName = "24-SEP-2017 09:11:23 PM">
+          android:versionCode = "1507052416"
+          android:versionName = "03-OCT-2017 01:40:16 PM">
 
     <uses-permission android:name = "android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name = "android.permission.INTERNET" />
@@ -11,15 +11,15 @@
     <application
         android:allowBackup = "false"
         android:icon = "@mipmap/ic_launcher"
-        android:label = "@string/app_name"
-        android:supportsRtl = "true"
+        android:label = "Battery Range"
         android:theme = "@style/AppTheme">
         <meta-data
             android:name = "com.google.android.geo.API_KEY"
-            android:value = "@string/google_maps_key" />
+            android:value = "AIzaSyCSjC4Clk9nHfoTJ8Pb1e6Ui8IsPHYIf9I" />
+
         <activity
             android:name = ".BatteryRange"
-            android:label = "@string/title_activity_battery_range"
+            android:label = "Battery Range"
             android:launchMode = "singleTop">
             <intent-filter>
                 <action android:name = "android.intent.action.MAIN" />
@@ -29,6 +29,15 @@
                 <action android:name = "android.intent.action.SEND" />
                 <category android:name = "android.intent.category.DEFAULT" />
                 <data android:mimeType = "text/plain" />
+            </intent-filter>
+        </activity>
+        <activity
+            android:name = ".BatterySettings"
+            android:label = "Battery Range Settings"
+            android:launchMode = "singleTop">
+            <intent-filter>
+                <action android:name = "android.intent.action.MAIN" />
+                <category android:name = "android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
     </application>

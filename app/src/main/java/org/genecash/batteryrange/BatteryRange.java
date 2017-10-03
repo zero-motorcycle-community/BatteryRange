@@ -109,6 +109,7 @@ public class BatteryRange extends AppCompatActivity
     // range is in meters
     double range = -1;
     // this is the range (in meters) at which power drops to zero
+    // this was discovered to be necessary after getting stranded
     double bullshit_factor;
     Marker markHome = null;
     Marker markDest = null;
@@ -181,7 +182,7 @@ public class BatteryRange extends AppCompatActivity
 
         // read preferences
         prefs = PreferenceManager.getDefaultSharedPreferences(this);
-        bullshit_factor = prefs.getInt(PREFS_BULLSHIT_FACTOR, 30) * 1000;
+        bullshit_factor = prefs.getInt(PREFS_BULLSHIT_FACTOR, 35) * 1000;
         flagCenter = prefs.getBoolean(PREFS_CENTER, true);
         flagZoom = prefs.getBoolean(PREFS_ZOOM, true);
         btName = prefs.getString(PREFS_DEVICE, null);
@@ -267,7 +268,7 @@ public class BatteryRange extends AppCompatActivity
     // handle GPS movement
     @Override
     public void onLocationChanged(Location location) {
-        log("onLocationChanged");
+        log("GPS: " + location.getLatitude() + "," + location.getLongitude() + " " + location.getSpeed() * 2.23694 + "mph");
         currLocation = location;
         LatLng position = new LatLng(location.getLatitude(), location.getLongitude());
 
@@ -765,22 +766,24 @@ public class BatteryRange extends AppCompatActivity
                 btBuffRdr = new BufferedReader(new InputStreamReader(btInputStream, "ASCII"));
                 btOutputStream = btSocket.getOutputStream();
 
+                // stop any output stream
+                btOutputStream.write(("\r\r").getBytes());
+
                 // initialize
-                // SP6    - use CANBUS protocol
                 // S0     - suppress spaces
+                // SP6    - use CANBUS protocol
                 // CAF0   - automatic formatting off
                 // JHF0   - header formatting off
                 // CRA440 - filter to only 0x440
-                String[] btInit = new String[]{"S0", "SP6", "S0", "CAF0", "JHF0", "CRA440"};
-                String response;
-                // stop any output stream
-                btOutputStream.write(("X\r").getBytes());
+                String[] btInit = new String[]{"S0", "S0", "S0", "SP6", "CAF0", "JHF0", "CRA440"};
                 for (String s : btInit) {
                     btOutputStream.write(("AT" + s + "\r").getBytes());
                     do {
-                        response = btBuffRdr.readLine();
-                        log(response);
-                    } while (!response.equals("OK") && !response.contains("?"));
+                        data = btBuffRdr.readLine();
+                        if (data != null) {
+                            log(data);
+                        }
+                    } while (!data.equals("OK") && !data.contains("?"));
                 }
                 log("init done");
                 publishProgress("Initialization complete");
@@ -806,7 +809,7 @@ public class BatteryRange extends AppCompatActivity
                     }
 
                     // not our message
-                    if (data.length() != 16) {
+                    if (data == null || data.length() != 16) {
                         continue;
                     }
 
@@ -822,14 +825,16 @@ public class BatteryRange extends AppCompatActivity
                     // range (meters) = 0x4D14*10
                     hex = data.substring(10, 12) + data.substring(8, 10);
                     range = (Integer.parseInt(hex, 16) * 10) - bullshit_factor;
+                    if (range < 0) {
+                        range = 0;
+                    }
                     if (range != oldRange) {
                         oldRange = range;
                         log("Range (meters):" + range);
                         log("Range (miles):" + Integer.parseInt(hex, 16) / 160.9);
                         publishProgress();
-                        if (range == 0) {
+                        if (range == 0 && data.equals("0000000000000000")) {
                             // device disconnected because the key was turned off
-                            // data: 0000000000000000
                             // note that we find out instantly here
                             // (this is kind of weird that this happens)
                             log("disconnected (range): " + data);
