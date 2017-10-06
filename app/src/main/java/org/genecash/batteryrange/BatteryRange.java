@@ -102,13 +102,17 @@ public class BatteryRange extends AppCompatActivity
     GoogleMap map;
     GoogleApiClient googleApiClient;
     boolean locationPermissionGranted;
-    Circle rangeCircle = null;
-    Circle rangeCircle2 = null;
+    // range as given by the bike
+    Circle rangeCircleFull = null;
+    // range minus bullshit factor
+    Circle rangeCircleReal = null;
+    // half of full range
+    Circle rangeCircleHalf = null;
     LocationRequest locationRequest;
     Location currLocation = null;
-    // range is in meters
+    // range (meters)
     double range = -1;
-    // this is the range (in meters) at which power drops to zero
+    // this is the range (meters) at which power drops to zero
     // this was discovered to be necessary after getting stranded
     double bullshit_factor;
     Marker markHome = null;
@@ -268,16 +272,18 @@ public class BatteryRange extends AppCompatActivity
     // handle GPS movement
     @Override
     public void onLocationChanged(Location location) {
-        log("GPS: " + location.getLatitude() + "," + location.getLongitude() + " " + location.getSpeed() * 2.23694 + "mph");
+        log("GPS: " + String.format("%.4f", location.getLatitude()) + "," + String.format("%.4f", location.getLongitude()) + " " +
+            String.format("%.0f", location.getSpeed() * 2.23694) + "mph");
         currLocation = location;
         LatLng position = new LatLng(location.getLatitude(), location.getLongitude());
 
-        createCircles();
+        updateCircles();
 
-        if (rangeCircle != null) {
+        if (rangeCircleFull != null) {
             log("reposition circles");
-            rangeCircle.setCenter(position);
-            rangeCircle2.setCenter(position);
+            rangeCircleFull.setCenter(position);
+            rangeCircleReal.setCenter(position);
+            rangeCircleHalf.setCenter(position);
         }
 
         resize(position);
@@ -311,6 +317,10 @@ public class BatteryRange extends AppCompatActivity
         }
         handler = null;
 
+        // remove circles
+        range=0;
+        updateCircles();
+
         // turn off location updates
         if (googleApiClient != null && googleApiClient.isConnected()) {
             LocationServices.FusedLocationApi.removeLocationUpdates(googleApiClient, this);
@@ -323,6 +333,8 @@ public class BatteryRange extends AppCompatActivity
     protected void onResume() {
         super.onResume();
         log("onResume");
+        running = true;
+        handler = new Handler();
 
         // turn on location updates
         if (googleApiClient != null && googleApiClient.isConnected()) {
@@ -362,14 +374,14 @@ public class BatteryRange extends AppCompatActivity
         menu.clear();
         if (btSocket != null && btSocket.isConnected()) {
             if (flagZoom) {
-                menu.add(Menu.NONE, MENU_ZOOM, Menu.NONE, "Do Not Zoom To Fit Range");
-            } else {
                 menu.add(Menu.NONE, MENU_ZOOM, Menu.NONE, "Zoom To Fit Range");
+            } else {
+                menu.add(Menu.NONE, MENU_ZOOM, Menu.NONE, "Do Not Zoom To Fit Range");
             }
             if (flagCenter) {
-                menu.add(Menu.NONE, MENU_CENTER, Menu.NONE, "Do Not Center Map On Location");
-            } else {
                 menu.add(Menu.NONE, MENU_CENTER, Menu.NONE, "Center Map On Location");
+            } else {
+                menu.add(Menu.NONE, MENU_CENTER, Menu.NONE, "Do Not Center Map On Location");
             }
         }
         if (currLocation != null) {
@@ -482,27 +494,43 @@ public class BatteryRange extends AppCompatActivity
     }
 
     // create range circles
-    void createCircles() {
-        if (rangeCircle == null && range > 0 && currLocation != null) {
-            log("create circles");
-            LatLng position = new LatLng(currLocation.getLatitude(), currLocation.getLongitude());
+    void updateCircles() {
+        if (currLocation != null) {
+            if (range == 0) {
+                if (rangeCircleFull != null) {
+                    rangeCircleHalf.remove();
+                    rangeCircleReal.remove();
+                    rangeCircleFull.remove();
+                    rangeCircleFull = null;
+                    rangeCircleReal = null;
+                    rangeCircleHalf = null;
+                }
+            } else {
+                if (rangeCircleFull == null) {
+                    log("create circles");
+                    LatLng position = new LatLng(currLocation.getLatitude(), currLocation.getLongitude());
 
-            // outer circle
-            // note that radius is in meters)
-            CircleOptions circleOptions = new CircleOptions()
-                    .center(position)
-                    .radius(range)
-                    .fillColor(Color.argb(32, 0, 0, 0))
-                    .clickable(true);
-            rangeCircle = map.addCircle(circleOptions);
+                    // note that radius is in meters)
+                    CircleOptions circleOptions = new CircleOptions()
+                            .center(position)
+                            .radius(range)
+                            .fillColor(Color.argb(32, 0, 0, 0))
+                            .clickable(true);
+                    rangeCircleFull = map.addCircle(circleOptions);
 
-            // inner circle
-            CircleOptions circleOptions2 = new CircleOptions()
-                    .center(position)
-                    .radius(range / 2)
-                    .fillColor(Color.argb(0, 0, 0, 0))
-                    .clickable(true);
-            rangeCircle2 = map.addCircle(circleOptions2);
+                    circleOptions.radius(range - bullshit_factor).fillColor(Color.argb(48, 0, 0, 0));
+                    rangeCircleReal = map.addCircle(circleOptions);
+
+                    circleOptions.radius((range - bullshit_factor) / 2).fillColor(Color.argb(64, 0, 0, 0));
+                    rangeCircleHalf = map.addCircle(circleOptions);
+                } else {
+                    log("update circles");
+                    rangeCircleFull.setRadius(range);
+                    rangeCircleReal.setRadius(range - bullshit_factor);
+                    rangeCircleHalf.setRadius((range - bullshit_factor) / 2);
+                    resize();
+                }
+            }
         }
     }
 
@@ -705,6 +733,7 @@ public class BatteryRange extends AppCompatActivity
         if (!btAdapter.isEnabled()) {
             // Bluetooth not enabled
             Toast.makeText(this, "Bluetooth not enabled", Toast.LENGTH_LONG).show();
+            finish();
             return;
         }
 
@@ -748,66 +777,38 @@ public class BatteryRange extends AppCompatActivity
 
             try {
                 // connect to dongle as a serial port I/O device
-                log("connect to dongle");
                 publishProgress("Connecting to device");
                 btSocket = btDevice.createRfcommSocketToServiceRecord(UUID.fromString("00001101-0000-1000-8000-00805F9B34FB"));
-                try {
-                    btSocket.connect();
-                } catch (IOException e) {
-                    // we were not able to connect
-                    log("unable to connect");
-                    // try again soon
-                    btRetry();
-                    return null;
-                }
-                log("connected");
+                btSocket.connect();
                 publishProgress("Device connected");
                 btInputStream = btSocket.getInputStream();
                 btBuffRdr = new BufferedReader(new InputStreamReader(btInputStream, "ASCII"));
                 btOutputStream = btSocket.getOutputStream();
 
                 // stop any output stream
-                btOutputStream.write(("\r\r").getBytes());
+                // also ensures we get a prompt
+                btOutputStream.write(("X\r").getBytes());
 
                 // initialize
+                // WS     - reset
                 // S0     - suppress spaces
                 // SP6    - use CANBUS protocol
                 // CAF0   - automatic formatting off
                 // JHF0   - header formatting off
                 // CRA440 - filter to only 0x440
-                String[] btInit = new String[]{"S0", "S0", "S0", "SP6", "CAF0", "JHF0", "CRA440"};
+                String[] btInit = new String[]{"WS", "WS", "S0", "SP6", "CAF0", "JHF0", "CRA440"};
                 for (String s : btInit) {
+                    waitPrompt();
                     btOutputStream.write(("AT" + s + "\r").getBytes());
-                    do {
-                        data = btBuffRdr.readLine();
-                        if (data != null) {
-                            log(data);
-                        }
-                    } while (!data.equals("OK") && !data.contains("?"));
+                    // log("init: AT" + s);
                 }
-                log("init done");
                 publishProgress("Initialization complete");
 
                 // ask for stream of updates
+                waitPrompt();
                 btOutputStream.write(("ATMA\r").getBytes());
                 while (running) {
-                    try {
-                        data = btBuffRdr.readLine();
-                    } catch (IOException e) {
-                        // the device disconnected
-                        // note that it takes a little while (about 20 seconds) to notice
-                        range = 0;
-                        log("disconnected (read)");
-                        publishProgress("Device disconnected (read error)");
-                        btOutputStream.close();
-                        btInputStream.close();
-                        btSocket.close();
-
-                        // try again soon
-                        btRetry();
-                        return null;
-                    }
-
+                    data = btBuffRdr.readLine();
                     // not our message
                     if (data == null || data.length() != 16) {
                         continue;
@@ -824,24 +825,19 @@ public class BatteryRange extends AppCompatActivity
                     // range (km) = 0x4D14/100
                     // range (meters) = 0x4D14*10
                     hex = data.substring(10, 12) + data.substring(8, 10);
-                    range = (Integer.parseInt(hex, 16) * 10) - bullshit_factor;
-                    if (range < 0) {
-                        range = 0;
-                    }
+                    range = (Integer.parseInt(hex, 16) * 10);
                     if (range != oldRange) {
                         oldRange = range;
-                        log("Range (meters):" + range);
-                        log("Range (miles):" + Integer.parseInt(hex, 16) / 160.9);
+                        log("Range (meters): " + range);
+                        log("Range (miles): " + String.format("%.2f", Integer.parseInt(hex, 16) / 160.9));
                         publishProgress();
-                        if (range == 0 && data.equals("0000000000000000")) {
-                            // device disconnected because the key was turned off
-                            // note that we find out instantly here
-                            // (this is kind of weird that this happens)
+
+                        // device disconnected because the key was turned off
+                        // note that we find out instantly here
+                        // (this is kind of weird that this happens)
+                        if (data.equals("0000000000000000")) {
                             log("disconnected (range): " + data);
                             publishProgress("Device disconnected (zero range)");
-                            btOutputStream.close();
-                            btInputStream.close();
-                            btSocket.close();
 
                             // try again soon
                             btRetry();
@@ -850,10 +846,6 @@ public class BatteryRange extends AppCompatActivity
                     }
                 }
 
-                range = 0;
-                log("disconnecting");
-                publishProgress("Disconnecting from device");
-
                 // stop output stream
                 btOutputStream.write(("X\r").getBytes());
 
@@ -861,11 +853,14 @@ public class BatteryRange extends AppCompatActivity
                 btOutputStream.close();
                 btInputStream.close();
                 btSocket.close();
-                log("disconnect done");
-                publishProgress("Disconnection complete");
-            } catch (IOException e) {
-                logExcept(e);
-                publishProgress("BtRange: " + e.getMessage());
+                log("Device disconnected");
+            } catch (Exception e) {
+                if (!e.getMessage().equals("bt socket closed, read return: -1") &&
+                    !e.getMessage().equals("read failed, socket might closed or timeout, read ret: -1")) {
+                    logExcept(e);
+                    publishProgress("BtRange: " + e.getMessage());
+                }
+                btRetry();
             }
             return null;
         }
@@ -875,40 +870,47 @@ public class BatteryRange extends AppCompatActivity
             if (values.length > 0) {
                 // we were passed a message to display
                 Toast.makeText(getApplicationContext(), values[0], Toast.LENGTH_SHORT).show();
+                log(values[0]);
                 return;
             }
 
-            if (range == 0) {
-                if (rangeCircle != null) {
-                    // disconnected, remove circles
-                    rangeCircle2.remove();
-                    rangeCircle.remove();
-                    rangeCircle = null;
-                    rangeCircle2 = null;
-                }
-            } else {
-                // update range circles
-                createCircles();
-                if (rangeCircle != null) {
-                    log("update circles");
-                    rangeCircle.setRadius(range);
-                    rangeCircle2.setRadius(range / 2);
-                    resize();
-                }
-            }
+            // update range circles
+            updateCircles();
         }
+    }
+
+    void waitPrompt() throws IOException {
+        int c;
+
+        // log("waitPrompt");
+        do {
+            c = btBuffRdr.read();
+        } while (c != '>');
     }
 
     // try to connect again after a delay
     void btRetry() {
+        // close everything
+        try {
+            if (btOutputStream != null) {
+                btOutputStream.close();
+            }
+            if (btInputStream != null) {
+                btInputStream.close();
+            }
+            if (btSocket != null) {
+                btSocket.close();
+            }
+        } catch (IOException e) {
+        }
+
         if (handler != null) {
             handler.postDelayed(new Runnable() {
                 @Override
                 public void run() {
-                    log("btRetry");
                     btConnect();
                 }
-            }, 5000);
+            }, 1000);
         }
     }
 }
