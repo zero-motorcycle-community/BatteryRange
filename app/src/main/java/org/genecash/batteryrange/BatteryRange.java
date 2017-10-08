@@ -92,6 +92,9 @@ public class BatteryRange extends AppCompatActivity
     static final String PREFS_DEST_LAT = "dest-lat";
     static final String PREFS_DEST_LNG = "dest-lng";
     static final String PREFS_DEST_SNIP = "dest-snip";
+    static final String PREFS_SAVE_LAT = "save-lat";
+    static final String PREFS_SAVE_LNG = "save-lng";
+    static final String PREFS_SAVE_ZOOM = "save-zoom";
     static final String PREFS_BULLSHIT_FACTOR = "bullshit-factor";
     // zoom to fit range circle
     boolean flagZoom;
@@ -136,7 +139,6 @@ public class BatteryRange extends AppCompatActivity
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.range);
-        handler = new Handler();
 
         // set up logging
         try {
@@ -239,6 +241,11 @@ public class BatteryRange extends AppCompatActivity
             }
         });
 
+        // restore last position
+        map.moveCamera(CameraUpdateFactory.newLatLngZoom(new LatLng(Double.longBitsToDouble(prefs.getLong(PREFS_SAVE_LAT, 0)),
+                                                                    Double.longBitsToDouble(prefs.getLong(PREFS_SAVE_LNG, 0))),
+                                                         prefs.getFloat(PREFS_SAVE_ZOOM, 0)));
+
         updateLocationUI();
         btConnect();
     }
@@ -275,18 +282,7 @@ public class BatteryRange extends AppCompatActivity
         log("GPS: " + String.format("%.4f", location.getLatitude()) + "," + String.format("%.4f", location.getLongitude()) + " " +
             String.format("%.0f", location.getSpeed() * 2.23694) + "mph");
         currLocation = location;
-        LatLng position = new LatLng(location.getLatitude(), location.getLongitude());
-
         updateCircles();
-
-        if (rangeCircleFull != null) {
-            log("reposition circles");
-            rangeCircleFull.setCenter(position);
-            rangeCircleReal.setCenter(position);
-            rangeCircleHalf.setCenter(position);
-        }
-
-        resize(position);
     }
 
     // handle map tap by showing circles
@@ -318,13 +314,24 @@ public class BatteryRange extends AppCompatActivity
         handler = null;
 
         // remove circles
-        range=0;
+        range = 0;
         updateCircles();
 
         // turn off location updates
         if (googleApiClient != null && googleApiClient.isConnected()) {
             LocationServices.FusedLocationApi.removeLocationUpdates(googleApiClient, this);
         }
+
+        // remember map position/zoom
+        if (map != null) {
+            CameraPosition pos = map.getCameraPosition();
+            SharedPreferences.Editor editor = prefs.edit();
+            editor.putLong(PREFS_SAVE_LAT, Double.doubleToRawLongBits(pos.target.latitude));
+            editor.putLong(PREFS_SAVE_LNG, Double.doubleToRawLongBits(pos.target.longitude));
+            editor.putFloat(PREFS_SAVE_ZOOM, pos.zoom);
+            editor.apply();
+        }
+
         super.onPause();
     }
 
@@ -372,22 +379,23 @@ public class BatteryRange extends AppCompatActivity
     @Override
     public boolean onPrepareOptionsMenu(Menu menu) {
         menu.clear();
-        if (btSocket != null && btSocket.isConnected()) {
-            if (flagZoom) {
-                menu.add(Menu.NONE, MENU_ZOOM, Menu.NONE, "Zoom To Fit Range");
-            } else {
-                menu.add(Menu.NONE, MENU_ZOOM, Menu.NONE, "Do Not Zoom To Fit Range");
-            }
-            if (flagCenter) {
-                menu.add(Menu.NONE, MENU_CENTER, Menu.NONE, "Center Map On Location");
-            } else {
-                menu.add(Menu.NONE, MENU_CENTER, Menu.NONE, "Do Not Center Map On Location");
-            }
+        if (flagZoom) {
+            menu.add(Menu.NONE, MENU_ZOOM, Menu.NONE, "Zoom To Fit Range");
+        } else {
+            menu.add(Menu.NONE, MENU_ZOOM, Menu.NONE, "Do Not Zoom To Fit Range");
         }
+
+        if (flagCenter) {
+            menu.add(Menu.NONE, MENU_CENTER, Menu.NONE, "Center Map On Location");
+        } else {
+            menu.add(Menu.NONE, MENU_CENTER, Menu.NONE, "Do Not Center Map On Location");
+        }
+
         if (currLocation != null) {
             menu.add(Menu.NONE, MENU_ADD_HOME, Menu.NONE, "Set Home Marker From GPS");
             menu.add(Menu.NONE, MENU_ADD_DEST, Menu.NONE, "Set Destination Marker From GPS");
         }
+
         menu.add(Menu.NONE, MENU_SEARCH, Menu.NONE, "Set Marker By Address/Coordinates");
         menu.add(Menu.NONE, MENU_DEVICE, Menu.NONE, "Select Bluetooth Device");
         super.onPrepareOptionsMenu(menu);
@@ -460,32 +468,29 @@ public class BatteryRange extends AppCompatActivity
         loggerSet.info(fcn + " exception:" + msg);
     }
 
-    // handle map positioning preference
-    void resize(LatLng position) {
-        log("resize");
-        if (flagZoom && range > 0) {
-            // zoom/pan map to exactly show circle at center
-            double r = range * 1.2;
-            LatLngBounds bounds = new LatLngBounds.Builder()
-                    .include(SphericalUtil.computeOffset(position, r, 0))
-                    .include(SphericalUtil.computeOffset(position, r, 90))
-                    .include(SphericalUtil.computeOffset(position, r, 180))
-                    .include(SphericalUtil.computeOffset(position, r, 270))
-                    .build();
-            map.moveCamera(CameraUpdateFactory.newLatLngBounds(bounds, 0));
-        } else if (flagCenter) {
-            // center on current location
-            map.moveCamera(CameraUpdateFactory.newLatLng(position));
-        }
-    }
-
+    // handle map repositioning
     void resize() {
+        log("resize");
         if (currLocation != null) {
-            resize(new LatLng(currLocation.getLatitude(), currLocation.getLongitude()));
+            LatLng position = new LatLng(currLocation.getLatitude(), currLocation.getLongitude());
+            if (flagZoom && range > 0) {
+                // zoom/pan map to exactly show circle at center
+                double r = range * 1.2;
+                LatLngBounds bounds = new LatLngBounds.Builder()
+                        .include(SphericalUtil.computeOffset(position, r, 0))
+                        .include(SphericalUtil.computeOffset(position, r, 90))
+                        .include(SphericalUtil.computeOffset(position, r, 180))
+                        .include(SphericalUtil.computeOffset(position, r, 270))
+                        .build();
+                map.moveCamera(CameraUpdateFactory.newLatLngBounds(bounds, 0));
+            } else if (flagCenter) {
+                // center on current location
+                map.moveCamera(CameraUpdateFactory.newLatLng(position));
+            }
         }
     }
 
-    // show the circles once
+    // show the circles once, when map is tapped
     void showCircles() {
         boolean old = flagZoom;
         flagZoom = true;
@@ -493,45 +498,57 @@ public class BatteryRange extends AppCompatActivity
         flagZoom = old;
     }
 
-    // create range circles
+    // update range circles
     void updateCircles() {
-        if (currLocation != null) {
-            if (range == 0) {
-                if (rangeCircleFull != null) {
-                    rangeCircleHalf.remove();
+        if (currLocation == null || range <= 0) {
+            if (rangeCircleFull != null) {
+                rangeCircleHalf.remove();
+                rangeCircleReal.remove();
+                rangeCircleFull.remove();
+                rangeCircleFull = null;
+                rangeCircleReal = null;
+                rangeCircleHalf = null;
+            }
+            return;
+        }
+
+        double r = range - bullshit_factor;
+        LatLng position = new LatLng(currLocation.getLatitude(), currLocation.getLongitude());
+        if (rangeCircleFull == null) {
+            log("create circles");
+            CircleOptions circleOptions = new CircleOptions()
+                    .center(position)
+                    .radius(range)
+                    .fillColor(Color.argb(32, 0, 0, 0))
+                    .clickable(true);
+            rangeCircleFull = map.addCircle(circleOptions);
+
+            if (r > 0) {
+                circleOptions.radius(r).fillColor(Color.argb(48, 0, 0, 0));
+                rangeCircleReal = map.addCircle(circleOptions);
+
+                circleOptions.radius(r / 2).fillColor(Color.argb(64, 0, 0, 0));
+                rangeCircleHalf = map.addCircle(circleOptions);
+            }
+        } else {
+            log("update circles");
+            rangeCircleFull.setRadius(range);
+            rangeCircleFull.setCenter(position);
+            if (r > 0) {
+                rangeCircleReal.setRadius(range - bullshit_factor);
+                rangeCircleHalf.setRadius((range - bullshit_factor) / 2);
+                rangeCircleReal.setCenter(position);
+                rangeCircleHalf.setCenter(position);
+            } else {
+                if (rangeCircleReal != null) {
                     rangeCircleReal.remove();
-                    rangeCircleFull.remove();
-                    rangeCircleFull = null;
+                    rangeCircleHalf.remove();
                     rangeCircleReal = null;
                     rangeCircleHalf = null;
                 }
-            } else {
-                if (rangeCircleFull == null) {
-                    log("create circles");
-                    LatLng position = new LatLng(currLocation.getLatitude(), currLocation.getLongitude());
-
-                    // note that radius is in meters)
-                    CircleOptions circleOptions = new CircleOptions()
-                            .center(position)
-                            .radius(range)
-                            .fillColor(Color.argb(32, 0, 0, 0))
-                            .clickable(true);
-                    rangeCircleFull = map.addCircle(circleOptions);
-
-                    circleOptions.radius(range - bullshit_factor).fillColor(Color.argb(48, 0, 0, 0));
-                    rangeCircleReal = map.addCircle(circleOptions);
-
-                    circleOptions.radius((range - bullshit_factor) / 2).fillColor(Color.argb(64, 0, 0, 0));
-                    rangeCircleHalf = map.addCircle(circleOptions);
-                } else {
-                    log("update circles");
-                    rangeCircleFull.setRadius(range);
-                    rangeCircleReal.setRadius(range - bullshit_factor);
-                    rangeCircleHalf.setRadius((range - bullshit_factor) / 2);
-                    resize();
-                }
             }
         }
+        resize();
     }
 
     // pop up dialog to pick device
@@ -903,6 +920,10 @@ public class BatteryRange extends AppCompatActivity
             }
         } catch (IOException e) {
         }
+
+        // remove circles
+        range = 0;
+        updateCircles();
 
         if (handler != null) {
             handler.postDelayed(new Runnable() {
