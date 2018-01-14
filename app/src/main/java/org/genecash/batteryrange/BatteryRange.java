@@ -80,6 +80,7 @@ public class BatteryRange extends AppCompatActivity
     static final int MENU_ADD_HOME = 4;
     static final int MENU_ADD_DEST = 5;
     static final int MENU_SEARCH = 6;
+    static final int MENU_SETUP = 7;
 
     // user preferences
     SharedPreferences prefs;
@@ -133,7 +134,9 @@ public class BatteryRange extends AppCompatActivity
     OutputStream btOutputStream;
     BufferedReader btBuffRdr;
     BtRange rangeTask;
-    boolean running;
+    volatile boolean running;
+    // well known serial device SPP
+    UUID uuid = UUID.fromString("00001101-0000-1000-8000-00805F9B34FB");
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -398,6 +401,7 @@ public class BatteryRange extends AppCompatActivity
 
         menu.add(Menu.NONE, MENU_SEARCH, Menu.NONE, "Set Marker By Address/Coordinates");
         menu.add(Menu.NONE, MENU_DEVICE, Menu.NONE, "Select Bluetooth Device");
+        menu.add(Menu.NONE, MENU_SETUP, Menu.NONE, "Setup Screen");
         super.onPrepareOptionsMenu(menu);
         return true;
     }
@@ -432,6 +436,11 @@ public class BatteryRange extends AppCompatActivity
                 return true;
             case MENU_SEARCH:
                 setMarker("", null);
+                return true;
+            case MENU_SETUP:
+                Intent i = new Intent(this, BatterySettings.class);
+                startActivity(i);
+                return true;
         }
         return super.onOptionsItemSelected(item);
     }
@@ -795,7 +804,7 @@ public class BatteryRange extends AppCompatActivity
             try {
                 // connect to dongle as a serial port I/O device
                 publishProgress("Connecting to device");
-                btSocket = btDevice.createRfcommSocketToServiceRecord(UUID.fromString("00001101-0000-1000-8000-00805F9B34FB"));
+                btSocket = btDevice.createInsecureRfcommSocketToServiceRecord(uuid);
                 btSocket.connect();
                 publishProgress("Device connected");
                 btInputStream = btSocket.getInputStream();
@@ -846,14 +855,13 @@ public class BatteryRange extends AppCompatActivity
                     if (range != oldRange) {
                         oldRange = range;
                         log("Range (meters): " + range);
-                        log("Range (miles): " + String.format("%.2f", Integer.parseInt(hex, 16) / 160.9));
+                        log("Range (miles): " + String.format("%.2f", range / 1609));
                         publishProgress();
 
                         // device disconnected because the key was turned off
                         // note that we find out instantly here
                         // (this is kind of weird that this happens)
                         if (data.equals("0000000000000000")) {
-                            log("disconnected (range): " + data);
                             publishProgress("Device disconnected (zero range)");
 
                             // try again soon
@@ -874,8 +882,8 @@ public class BatteryRange extends AppCompatActivity
             } catch (Exception e) {
                 if (!e.getMessage().equals("bt socket closed, read return: -1") &&
                     !e.getMessage().equals("read failed, socket might closed or timeout, read ret: -1")) {
-                    logExcept(e);
                     publishProgress("BtRange: " + e.getMessage());
+                    logExcept(e);
                 }
                 btRetry();
             }
@@ -923,7 +931,6 @@ public class BatteryRange extends AppCompatActivity
 
         // remove circles
         range = 0;
-        updateCircles();
 
         if (handler != null) {
             handler.postDelayed(new Runnable() {
@@ -931,7 +938,7 @@ public class BatteryRange extends AppCompatActivity
                 public void run() {
                     btConnect();
                 }
-            }, 1000);
+            }, 2000);
         }
     }
 }
