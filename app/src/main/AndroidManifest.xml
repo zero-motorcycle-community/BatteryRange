@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android = "http://schemas.android.com/apk/res/android"
           package = "org.genecash.batteryrange"
-          android:versionCode = "1513898234"
-          android:versionName = "21-DEC-2017 06:17:14 PM">
+          android:versionCode = "1528677610"
+          android:versionName = "10-JUN-2018 08:40:10 PM">
 
     <uses-permission android:name = "android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name = "android.permission.INTERNET" />
@@ -10,8 +10,7 @@
 
     <application
         android:icon = "@mipmap/ic_launcher"
-        android:label = "Battery Range"
-        android:theme = "@style/AppTheme">
+        android:label = "Battery Range">
         <meta-data
             android:name = "com.google.android.geo.API_KEY"
             android:value = "AIzaSyCSjC4Clk9nHfoTJ8Pb1e6Ui8IsPHYIf9I" />
@@ -33,7 +32,6 @@
         <activity
             android:name = ".BatterySettings"
             android:label = "Battery Range Settings"
-            android:launchMode = "singleTop">
-        </activity>
+            android:launchMode = "singleTop" />
     </application>
 </manifest>

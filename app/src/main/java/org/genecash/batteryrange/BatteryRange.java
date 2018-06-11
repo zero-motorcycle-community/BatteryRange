@@ -5,24 +5,25 @@ import android.app.AlertDialog;
 import android.bluetooth.BluetoothAdapter;
 import android.bluetooth.BluetoothDevice;
 import android.bluetooth.BluetoothSocket;
+import android.content.BroadcastReceiver;
+import android.content.Context;
 import android.content.DialogInterface;
 import android.content.Intent;
+import android.content.IntentFilter;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.graphics.Color;
 import android.location.Address;
 import android.location.Geocoder;
 import android.location.Location;
+import android.location.LocationListener;
 import android.location.LocationManager;
 import android.os.AsyncTask;
 import android.os.Bundle;
 import android.os.Handler;
 import android.preference.PreferenceManager;
-import android.support.annotation.NonNull;
-import android.support.annotation.Nullable;
-import android.support.v4.app.ActivityCompat;
-import android.support.v4.content.ContextCompat;
-import android.support.v7.app.AppCompatActivity;
+import android.support.v4.app.FragmentActivity;
+import android.text.format.DateUtils;
 import android.util.Log;
 import android.view.Menu;
 import android.view.MenuItem;
@@ -33,8 +34,6 @@ import android.widget.Toast;
 
 import com.google.android.gms.common.ConnectionResult;
 import com.google.android.gms.common.api.GoogleApiClient;
-import com.google.android.gms.location.LocationListener;
-import com.google.android.gms.location.LocationRequest;
 import com.google.android.gms.location.LocationServices;
 import com.google.android.gms.location.places.Places;
 import com.google.android.gms.maps.CameraUpdateFactory;
@@ -64,7 +63,7 @@ import java.util.logging.FileHandler;
 import java.util.logging.Logger;
 
 @SuppressWarnings("MissingPermission")
-public class BatteryRange extends AppCompatActivity
+public class BatteryRange extends FragmentActivity
         implements OnMapReadyCallback, GoogleApiClient.ConnectionCallbacks, GoogleApiClient.OnConnectionFailedListener, LocationListener,
                    GoogleMap.OnMapLongClickListener, GoogleMap.OnMapClickListener {
 
@@ -97,6 +96,7 @@ public class BatteryRange extends AppCompatActivity
     static final String PREFS_SAVE_LNG = "save-lng";
     static final String PREFS_SAVE_ZOOM = "save-zoom";
     static final String PREFS_BULLSHIT_FACTOR = "bullshit-factor";
+    static final String ACTION_UPDATE = "org.genecash.batteryrange.update";
     // zoom to fit range circle
     boolean flagZoom;
     // center on location
@@ -105,14 +105,12 @@ public class BatteryRange extends AppCompatActivity
     // Google Map
     GoogleMap map;
     GoogleApiClient googleApiClient;
+    LocationManager locationManager;
     boolean locationPermissionGranted;
-    // range as given by the bike
+    // range as given by the bike minus bullshit factor
     Circle rangeCircleFull = null;
-    // range minus bullshit factor
-    Circle rangeCircleReal = null;
     // half of full range
     Circle rangeCircleHalf = null;
-    LocationRequest locationRequest;
     Location currLocation = null;
     // range (meters)
     double range = -1;
@@ -138,6 +136,16 @@ public class BatteryRange extends AppCompatActivity
     // well known serial device SPP
     UUID uuid = UUID.fromString("00001101-0000-1000-8000-00805F9B34FB");
 
+    // update bullshit factor when changed in settings screen
+    BroadcastReceiver broadcastReceiver = new BroadcastReceiver() {
+        @Override
+        public void onReceive(Context context, Intent intent) {
+            if (ACTION_UPDATE.equals(intent.getAction())) {
+                bullshit_factor = prefs.getInt(PREFS_BULLSHIT_FACTOR, 35) * 1000;
+            }
+        }
+    };
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -154,15 +162,12 @@ public class BatteryRange extends AppCompatActivity
             Toast.makeText(this, msg, Toast.LENGTH_LONG).show();
             Log.e("batteryrange", msg);
         }
-        log("\n----------------------------------------------------------------");
-        log("onCreate");
 
-        if (ContextCompat.checkSelfPermission(this.getApplicationContext(), Manifest.permission.ACCESS_FINE_LOCATION) ==
+        if (checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) ==
             PackageManager.PERMISSION_GRANTED) {
             locationPermissionGranted = true;
         } else {
-            ActivityCompat.requestPermissions(this, new String[]{Manifest.permission.ACCESS_FINE_LOCATION},
-                                              PERMISSIONS_REQUEST_ACCESS_FINE_LOCATION);
+            requestPermissions(new String[]{Manifest.permission.ACCESS_FINE_LOCATION}, PERMISSIONS_REQUEST_ACCESS_FINE_LOCATION);
         }
 
         // get intent, action and MIME type
@@ -181,10 +186,9 @@ public class BatteryRange extends AppCompatActivity
         }
 
         // check to see if the GPS is enabled
-        LocationManager manager = (LocationManager) getSystemService(LOCATION_SERVICE);
-        if (!manager.isProviderEnabled(LocationManager.GPS_PROVIDER)) {
+        locationManager = (LocationManager) getSystemService(LOCATION_SERVICE);
+        if (!locationManager.isProviderEnabled(LocationManager.GPS_PROVIDER)) {
             Toast.makeText(this, "GPS is not enabled", Toast.LENGTH_LONG).show();
-            log("GPS is not enabled");
             finish();
             return;
         }
@@ -198,6 +202,7 @@ public class BatteryRange extends AppCompatActivity
         if (btName == null || btName.length() == 0) {
             selectDevice();
         }
+        registerReceiver(broadcastReceiver, new IntentFilter(ACTION_UPDATE));
 
         // build the Play services client for use by the Fused Location Provider and the Places API
         if (locationPermissionGranted) {
@@ -215,7 +220,6 @@ public class BatteryRange extends AppCompatActivity
     // Manipulates the map when it's available
     @Override
     public void onMapReady(GoogleMap googleMap) {
-        log("onMapReady");
         map = googleMap;
 
         // load markers from preferences
@@ -255,37 +259,43 @@ public class BatteryRange extends AppCompatActivity
 
     // builds the map when the Google Play services client is successfully connected
     @Override
-    public void onConnected(@Nullable Bundle bundle) {
-        log("onConnected");
+    public void onConnected(Bundle bundle) {
         SupportMapFragment mapFragment = (SupportMapFragment) getSupportFragmentManager().findFragmentById(R.id.map);
         mapFragment.getMapAsync(this);
-        locationRequest = new LocationRequest()
-                .setInterval(10000) // milliseconds
-                .setFastestInterval(5000) // milliseconds
-                .setSmallestDisplacement(10) // meters
-                .setPriority(LocationRequest.PRIORITY_HIGH_ACCURACY);
-        LocationServices.FusedLocationApi.requestLocationUpdates(googleApiClient, locationRequest, this);
+        locationManager.requestLocationUpdates(LocationManager.GPS_PROVIDER, 5 * DateUtils.SECOND_IN_MILLIS, 50, this);
     }
 
     // handles suspension of the connection to the Google Play services client
     @Override
     public void onConnectionSuspended(int i) {
-        log("Play services connection suspended");
     }
 
     // handles failure to connect to the Google Play services client
     @Override
-    public void onConnectionFailed(@NonNull ConnectionResult result) {
+    public void onConnectionFailed(ConnectionResult result) {
         log("Play services connection failed: " + result.getErrorCode());
     }
 
     // handle GPS movement
     @Override
     public void onLocationChanged(Location location) {
-        log("GPS: " + String.format("%.4f", location.getLatitude()) + "," + String.format("%.4f", location.getLongitude()) + " " +
-            String.format("%.0f", location.getSpeed() * 2.23694) + "mph");
         currLocation = location;
         updateCircles();
+    }
+
+    @Override
+    public void onStatusChanged(String provider, int status, Bundle extras) {
+
+    }
+
+    @Override
+    public void onProviderEnabled(String provider) {
+
+    }
+
+    @Override
+    public void onProviderDisabled(String provider) {
+
     }
 
     // handle map tap by showing circles
@@ -307,8 +317,6 @@ public class BatteryRange extends AppCompatActivity
     // save battery when we're not focused
     @Override
     protected void onPause() {
-        log("onPause");
-
         // disconnect from Bluetooth and stop connection retries
         running = false;
         if (rangeTask != null) {
@@ -322,7 +330,7 @@ public class BatteryRange extends AppCompatActivity
 
         // turn off location updates
         if (googleApiClient != null && googleApiClient.isConnected()) {
-            LocationServices.FusedLocationApi.removeLocationUpdates(googleApiClient, this);
+            locationManager.removeUpdates(this);
         }
 
         // remember map position/zoom
@@ -342,36 +350,40 @@ public class BatteryRange extends AppCompatActivity
     @Override
     protected void onResume() {
         super.onResume();
-        log("onResume");
         running = true;
         handler = new Handler();
 
         // turn on location updates
         if (googleApiClient != null && googleApiClient.isConnected()) {
-            LocationServices.FusedLocationApi.requestLocationUpdates(googleApiClient, locationRequest, this);
+            locationManager.requestLocationUpdates(LocationManager.GPS_PROVIDER, 5 * DateUtils.SECOND_IN_MILLIS, 50, this);
         }
     }
 
     @Override
     protected void onDestroy() {
-        log("onDestroy");
+        try {
+            unregisterReceiver(broadcastReceiver);
+        } catch (Exception e) {
+            // there's no way to tell if a receiver has been registered...
+            // you have to just unregister it anyway and deal
+        }
 
         // close logging file handlers to get rid of "lck" turdlets
         for (java.util.logging.Handler h : loggerSet.getHandlers()) {
             h.close();
         }
+
         super.onDestroy();
     }
 
     // handles Marshmallow permission dialog result
     @Override
-    public void onRequestPermissionsResult(int requestCode, @NonNull String permissions[], @NonNull int[] grantResults) {
+    public void onRequestPermissionsResult(int requestCode, String permissions[], int[] grantResults) {
         locationPermissionGranted = false;
         switch (requestCode) {
             case PERMISSIONS_REQUEST_ACCESS_FINE_LOCATION: {
                 if (grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
                     locationPermissionGranted = true;
-                    log("permission granted");
                 }
             }
         }
@@ -447,7 +459,6 @@ public class BatteryRange extends AppCompatActivity
 
     // updates the map's UI settings based on whether the user has granted location permission
     void updateLocationUI() {
-        log("updateLocationUI");
         if (map == null) {
             return;
         }
@@ -479,7 +490,6 @@ public class BatteryRange extends AppCompatActivity
 
     // handle map repositioning
     void resize() {
-        log("resize");
         if (currLocation != null) {
             LatLng position = new LatLng(currLocation.getLatitude(), currLocation.getLongitude());
             if (flagZoom && range > 0) {
@@ -509,53 +519,33 @@ public class BatteryRange extends AppCompatActivity
 
     // update range circles
     void updateCircles() {
-        if (currLocation == null || range <= 0) {
+        double realRange = range - bullshit_factor;
+        if (currLocation == null || realRange <= 0) {
             if (rangeCircleFull != null) {
                 rangeCircleHalf.remove();
-                rangeCircleReal.remove();
                 rangeCircleFull.remove();
                 rangeCircleFull = null;
-                rangeCircleReal = null;
                 rangeCircleHalf = null;
             }
             return;
         }
 
-        double r = range - bullshit_factor;
         LatLng position = new LatLng(currLocation.getLatitude(), currLocation.getLongitude());
         if (rangeCircleFull == null) {
-            log("create circles");
             CircleOptions circleOptions = new CircleOptions()
                     .center(position)
-                    .radius(range)
+                    .radius(realRange)
                     .fillColor(Color.argb(32, 0, 0, 0))
                     .clickable(true);
             rangeCircleFull = map.addCircle(circleOptions);
 
-            if (r > 0) {
-                circleOptions.radius(r).fillColor(Color.argb(48, 0, 0, 0));
-                rangeCircleReal = map.addCircle(circleOptions);
-
-                circleOptions.radius(r / 2).fillColor(Color.argb(64, 0, 0, 0));
-                rangeCircleHalf = map.addCircle(circleOptions);
-            }
+            circleOptions.radius(realRange / 2).fillColor(Color.argb(64, 0, 0, 0));
+            rangeCircleHalf = map.addCircle(circleOptions);
         } else {
-            log("update circles");
-            rangeCircleFull.setRadius(range);
+            rangeCircleFull.setRadius(realRange);
             rangeCircleFull.setCenter(position);
-            if (r > 0) {
-                rangeCircleReal.setRadius(range - bullshit_factor);
-                rangeCircleHalf.setRadius((range - bullshit_factor) / 2);
-                rangeCircleReal.setCenter(position);
-                rangeCircleHalf.setCenter(position);
-            } else {
-                if (rangeCircleReal != null) {
-                    rangeCircleReal.remove();
-                    rangeCircleHalf.remove();
-                    rangeCircleReal = null;
-                    rangeCircleHalf = null;
-                }
-            }
+            rangeCircleHalf.setRadius(realRange / 2);
+            rangeCircleHalf.setCenter(position);
         }
         resize();
     }
@@ -741,7 +731,6 @@ public class BatteryRange extends AppCompatActivity
 
     // connect to our device and initialize it
     void btConnect() {
-        log("btConnect");
         // punt if we've exited the app
         if (handler == null) {
             return;
@@ -826,7 +815,6 @@ public class BatteryRange extends AppCompatActivity
                 for (String s : btInit) {
                     waitPrompt();
                     btOutputStream.write(("AT" + s + "\r").getBytes());
-                    // log("init: AT" + s);
                 }
                 publishProgress("Initialization complete");
 
@@ -854,8 +842,6 @@ public class BatteryRange extends AppCompatActivity
                     range = (Integer.parseInt(hex, 16) * 10);
                     if (range != oldRange) {
                         oldRange = range;
-                        log("Range (meters): " + range);
-                        log("Range (miles): " + String.format("%.2f", range / 1609));
                         publishProgress();
 
                         // device disconnected because the key was turned off
@@ -878,7 +864,6 @@ public class BatteryRange extends AppCompatActivity
                 btOutputStream.close();
                 btInputStream.close();
                 btSocket.close();
-                log("Device disconnected");
             } catch (Exception e) {
                 if (!e.getMessage().equals("bt socket closed, read return: -1") &&
                     !e.getMessage().equals("read failed, socket might closed or timeout, read ret: -1")) {
@@ -895,7 +880,6 @@ public class BatteryRange extends AppCompatActivity
             if (values.length > 0) {
                 // we were passed a message to display
                 Toast.makeText(getApplicationContext(), values[0], Toast.LENGTH_SHORT).show();
-                log(values[0]);
                 return;
             }
 
@@ -907,7 +891,6 @@ public class BatteryRange extends AppCompatActivity
     void waitPrompt() throws IOException {
         int c;
 
-        // log("waitPrompt");
         do {
             c = btBuffRdr.read();
         } while (c != '>');

@@ -1,5 +1,7 @@
 package org.genecash.batteryrange;
 
+import android.text.format.DateUtils;
+
 import java.text.Format;
 import java.text.SimpleDateFormat;
 import java.util.Date;
@@ -19,7 +21,7 @@ public class CustomLogFormatter extends Formatter {
         s = formatter.format(date);
         if (last_time > 0) {
             // awk '{print $2 ;}' service-log0.txt | sort -gr | more
-            s += " +" + String.format("%.3f", (record.getMillis() - last_time) / 1000.0);
+            s += " +" + String.format("%.3f", (record.getMillis() - last_time) / DateUtils.SECOND_IN_MILLIS);
         }
         last_time = record.getMillis();
         return s + " " + formatMessage(record) + "\n";

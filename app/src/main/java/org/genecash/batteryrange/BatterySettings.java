@@ -1,6 +1,7 @@
 package org.genecash.batteryrange;
 
 import android.app.Activity;
+import android.content.Intent;
 import android.content.SharedPreferences;
 import android.os.Bundle;
 import android.preference.PreferenceManager;
@@ -42,6 +43,9 @@ public class BatterySettings extends Activity {
 
                 if (editor.commit()) {
                     Toast.makeText(getApplicationContext(), "Settings saved", Toast.LENGTH_LONG).show();
+                    // tell running app about new setting
+                    sendBroadcast(new Intent(BatteryRange.ACTION_UPDATE));
+                    finish();
                 } else {
                     Toast.makeText(getApplicationContext(), "Settings error", Toast.LENGTH_LONG).show();
                 }
