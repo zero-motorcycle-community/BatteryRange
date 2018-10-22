@@ -80,6 +80,7 @@ public class BatteryRange extends FragmentActivity
     static final int MENU_ADD_DEST = 5;
     static final int MENU_SEARCH = 6;
     static final int MENU_SETUP = 7;
+    static final int MENU_TEST = 8;
 
     // user preferences
     SharedPreferences prefs;
@@ -97,26 +98,38 @@ public class BatteryRange extends FragmentActivity
     static final String PREFS_SAVE_ZOOM = "save-zoom";
     static final String PREFS_BULLSHIT_FACTOR = "bullshit-factor";
     static final String ACTION_UPDATE = "org.genecash.batteryrange.update";
+
     // zoom to fit range circle
     boolean flagZoom;
+
     // center on location
     boolean flagCenter;
+
+    // testing
+    boolean flagTest = false;
+    long testTime;
 
     // Google Map
     GoogleMap map;
     GoogleApiClient googleApiClient;
     LocationManager locationManager;
     boolean locationPermissionGranted;
+
     // range as given by the bike minus bullshit factor
     Circle rangeCircleFull = null;
+
     // half of full range
     Circle rangeCircleHalf = null;
+
     Location currLocation = null;
+
     // range (meters)
     double range = -1;
+
     // this is the range (meters) at which power drops to zero
     // this was discovered to be necessary after getting stranded
     double bullshit_factor;
+
     Marker markHome = null;
     Marker markDest = null;
     static final int MARK_UNKNOWN = 0;
@@ -394,6 +407,12 @@ public class BatteryRange extends FragmentActivity
     @Override
     public boolean onPrepareOptionsMenu(Menu menu) {
         menu.clear();
+        if (flagTest) {
+            menu.add(Menu.NONE, MENU_TEST, Menu.NONE, "Testing mode");
+        } else {
+            menu.add(Menu.NONE, MENU_TEST, Menu.NONE, "Normal mode");
+        }
+
         if (flagZoom) {
             menu.add(Menu.NONE, MENU_ZOOM, Menu.NONE, "Zoom To Fit Range");
         } else {
@@ -423,6 +442,12 @@ public class BatteryRange extends FragmentActivity
     public boolean onOptionsItemSelected(MenuItem item) {
         SharedPreferences.Editor editor;
         switch (item.getItemId()) {
+            case MENU_TEST:
+                flagTest = !flagTest;
+                if (flagTest) {
+                    testTime = System.currentTimeMillis();
+                }
+                return true;
             case MENU_ZOOM:
                 flagZoom = !flagZoom;
                 resize();
@@ -494,7 +519,7 @@ public class BatteryRange extends FragmentActivity
             LatLng position = new LatLng(currLocation.getLatitude(), currLocation.getLongitude());
             if (flagZoom && range > 0) {
                 // zoom/pan map to exactly show circle at center
-                double r = range * 1.2;
+                double r = (range - bullshit_factor) * 1.1;
                 LatLngBounds bounds = new LatLngBounds.Builder()
                         .include(SphericalUtil.computeOffset(position, r, 0))
                         .include(SphericalUtil.computeOffset(position, r, 90))
@@ -785,6 +810,25 @@ public class BatteryRange extends FragmentActivity
             double oldRange = range;
             running = true;
 
+            // output a steadily decreasing range for testing
+            if (flagTest) {
+                while (flagTest) {
+                    long t = System.currentTimeMillis();
+                    if (t - testTime > 1000) {
+                        if (range < 1000) {
+                            // 100km
+                            range = 100000;
+                        }
+                        Log.i("batteryrange", "testing: " + range);
+                        testTime = t;
+                        range -= 1000;
+                        publishProgress();
+                    }
+                }
+                btRetry();
+                return null;
+            }
+
             // punt if we've exited the app
             if (handler == null) {
                 return null;
@@ -821,7 +865,7 @@ public class BatteryRange extends FragmentActivity
                 // ask for stream of updates
                 waitPrompt();
                 btOutputStream.write(("ATMA\r").getBytes());
-                while (running) {
+                while (running && !flagTest) {
                     data = btBuffRdr.readLine();
                     // not our message
                     if (data == null || data.length() != 16) {

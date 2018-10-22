@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android = "http://schemas.android.com/apk/res/android"
           package = "org.genecash.batteryrange"
-          android:versionCode = "1528677610"
-          android:versionName = "10-JUN-2018 08:40:10 PM">
+          android:versionCode = "1537140763"
+          android:versionName = "16-SEP-2018 07:32:43 PM">
 
     <uses-permission android:name = "android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name = "android.permission.INTERNET" />
